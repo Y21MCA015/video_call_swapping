@@ -78,8 +78,27 @@ function App() {
       case 'call':
         // Someone is calling us
         setIncomingCall(data.from);
-        // We know they want to talk to us. We wait for them to send the "offer" when we answer.
-        // Or actually, standard WebRTC usually sends 'offer' to initiate. But our previous logic was 'call'.
+        break;
+
+      case 'call_accepted':
+        // The target has accepted our call, NOW we can safely create the offer.
+        setTargetUser(data.from);
+        (async () => {
+          const pc = createPeerConnection(data.from);
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          wsRef.current.sendMessage({
+            type: 'offer',
+            offer: offer,
+            to: data.from,
+            from: role
+          });
+        })();
+        break;
+
+      case 'call_ended':
+        // The other person ended the call
+        cleanupCall(false);
         break;
 
       case 'offer':
@@ -135,20 +154,9 @@ function App() {
     setActiveCall(true);
     await setupMedia();
     
-    const pc = createPeerConnection(target);
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-
-    // Initial alert (from previous logic) to wake up the UI, followed by the offer.
+    // Initial alert to wake up the UI. 
+    // We will wait for "call_accepted" before creating the peer connection and offer.
     wsRef.current.sendMessage({ type: 'call', from: role, to: target });
-
-    // Send the actual SDP offer
-    wsRef.current.sendMessage({
-      type: 'offer',
-      offer: offer,
-      to: target,
-      from: role
-    });
   };
 
   const answerCall = async () => {
@@ -161,9 +169,13 @@ function App() {
 
     await setupMedia();
     createPeerConnection(caller);
-    // The peer connection expects the 'offer' which actually might have arrived or will arrive.
-    // In our simplified logic, offer arrives right after 'call'. 
-    // They are queued or arrive in sequence. 
+
+    // Let the caller know we are ready to receive their SDP offer
+    wsRef.current.sendMessage({
+      type: 'call_accepted',
+      to: caller,
+      from: role
+    });
   };
 
   const rejectCall = () => {
@@ -177,14 +189,33 @@ function App() {
     }
   };
 
-  const endCall = () => {
+  const cleanupCall = (notifyOther = true) => {
+    if (notifyOther && targetUser) {
+      wsRef.current.sendMessage({
+        type: 'call_ended',
+        to: targetUser,
+        from: role
+      });
+    }
+    
     if (pcRef.current) {
       pcRef.current.close();
       pcRef.current = null;
     }
+    
+    // Stop local camera tracks to free hardware
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => track.stop());
+      localStreamRef.current = null;
+    }
+
     setActiveCall(false);
     setTargetUser(null);
     setIncomingCall(null);
+  };
+
+  const endCall = () => {
+    cleanupCall(true);
   };
 
   // Re-bind media streams when component remounts or states change
