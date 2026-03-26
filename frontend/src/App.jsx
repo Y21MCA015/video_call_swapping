@@ -26,6 +26,8 @@ function App() {
   const localStreamRef = useRef(null);
   // Ref to track targetUser inside async callbacks without stale closures
   const targetUserRef = useRef(null);
+  // Ref that always points to the LATEST handleSignalingData, avoiding stale closure in WebSocket
+  const signalingCallbackRef = useRef(null);
 
   const setupMedia = async () => {
     try {
@@ -147,8 +149,13 @@ function App() {
     }
   };
 
+  // Always keep signalingCallbackRef up to date with the latest handleSignalingData
+  // This prevents the WebSocket from calling a stale version of the function.
+  signalingCallbackRef.current = handleSignalingData;
+
   const connect = () => {
-    wsRef.current = new CallWebSocket(role, handleSignalingData);
+    // Pass a stable wrapper that always calls the latest handler via the ref
+    wsRef.current = new CallWebSocket(role, (data) => signalingCallbackRef.current(data));
     wsRef.current.connect();
     setIsConnected(true);
   };
