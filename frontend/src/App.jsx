@@ -24,6 +24,8 @@ function App() {
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const localStreamRef = useRef(null);
+  // Ref to track targetUser inside async callbacks without stale closures
+  const targetUserRef = useRef(null);
 
   const setupMedia = async () => {
     try {
@@ -81,16 +83,18 @@ function App() {
         break;
 
       case 'call_accepted':
-        // The target has accepted our call, NOW we can safely create the offer.
-        setTargetUser(data.from);
+        // The target accepted. Create offer and send it addressed to the ORIGINAL target
+        // (e.g. 'A') so the backend swap routes it correctly to the actual receiver ('B').
+        // Do NOT change targetUser here — it must stay as the original call target.
         (async () => {
-          const pc = createPeerConnection(data.from);
+          const originalTarget = targetUserRef.current;
+          const pc = createPeerConnection(originalTarget);
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
           wsRef.current.sendMessage({
             type: 'offer',
             offer: offer,
-            to: data.from,
+            to: originalTarget,
             from: role
           });
         })();
@@ -150,12 +154,12 @@ function App() {
   };
 
   const startCall = async (target) => {
+    targetUserRef.current = target; // sync ref FIRST before any async ops
     setTargetUser(target);
     setActiveCall(true);
     await setupMedia();
     
-    // Initial alert to wake up the UI. 
-    // We will wait for "call_accepted" before creating the peer connection and offer.
+    // Only send 'call'. Wait for 'call_accepted' before creating the PeerConnection.
     wsRef.current.sendMessage({ type: 'call', from: role, to: target });
   };
 
@@ -163,6 +167,7 @@ function App() {
     if (!incomingCall) return;
     
     const caller = incomingCall;
+    targetUserRef.current = caller; // sync ref
     setTargetUser(caller);
     setIncomingCall(null);
     setActiveCall(true);
@@ -190,10 +195,10 @@ function App() {
   };
 
   const cleanupCall = (notifyOther = true) => {
-    if (notifyOther && targetUser) {
+    if (notifyOther && targetUserRef.current) {
       wsRef.current.sendMessage({
         type: 'call_ended',
-        to: targetUser,
+        to: targetUserRef.current,
         from: role
       });
     }
@@ -209,6 +214,7 @@ function App() {
       localStreamRef.current = null;
     }
 
+    targetUserRef.current = null;
     setActiveCall(false);
     setTargetUser(null);
     setIncomingCall(null);
