@@ -4,25 +4,30 @@ import './App.css';
 
 const ICE_SERVERS = {
   iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    // Free TURN relay servers — required for mobile data (symmetric NAT)
     {
-      urls: 'turn:openrelay.metered.ca:80',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
+      urls: "stun:stun.relay.metered.ca:80",
     },
     {
-      urls: 'turn:openrelay.metered.ca:443',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
+      urls: "turn:global.relay.metered.ca:80",
+      username: "506b4cbedceb97073bfcaec3",
+      credential: "airmf3KcbIf1014V",
     },
     {
-      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
-    }
-  ]
+      urls: "turn:global.relay.metered.ca:80?transport=tcp",
+      username: "506b4cbedceb97073bfcaec3",
+      credential: "airmf3KcbIf1014V",
+    },
+    {
+      urls: "turn:global.relay.metered.ca:443",
+      username: "506b4cbedceb97073bfcaec3",
+      credential: "airmf3KcbIf1014V",
+    },
+    {
+      urls: "turns:global.relay.metered.ca:443?transport=tcp",
+      username: "506b4cbedceb97073bfcaec3",
+      credential: "airmf3KcbIf1014V",
+    },
+  ],
 };
 
 function App() {
@@ -62,7 +67,10 @@ function App() {
   };
 
   const createPeerConnection = (target) => {
-    const pc = new RTCPeerConnection(ICE_SERVERS);
+    const pc = new RTCPeerConnection({
+      iceServers: ICE_SERVERS.iceServers,
+      iceTransportPolicy: "all"
+    });
     pcRef.current = pc;
 
     // Add local stream tracks to PC
@@ -72,29 +80,20 @@ function App() {
       });
     }
 
-    // On remote track received — use retry if video element not mounted yet
+    // On remote track received
     pc.ontrack = (event) => {
-      console.log('[WebRTC] ontrack fired, streams:', event.streams.length, 'track:', event.track.kind);
-      const remoteStream = event.streams[0] || new MediaStream([event.track]);
-      const assignStream = () => {
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = remoteStream;
-          console.log('[WebRTC] Remote stream assigned to video element');
-        } else {
-          console.warn('[WebRTC] remoteVideoRef not ready, retrying in 300ms...');
-          setTimeout(assignStream, 300);
-        }
-      };
-      assignStream();
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = event.streams[0];
+      }
     };
 
     // Log ICE connection state changes for debugging
     pc.oniceconnectionstatechange = () => {
-      console.log('[ICE] Connection state:', pc.iceConnectionState);
+      console.log("ICE State:", pc.iceConnectionState);
     };
 
     pc.onconnectionstatechange = () => {
-      console.log('[WebRTC] Peer connection state:', pc.connectionState);
+      console.log("Connection State:", pc.connectionState);
     };
 
     // On ICE candidate generated
