@@ -40,10 +40,11 @@ function App() {
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const localStreamRef = useRef(null);
-  // Ref to track targetUser inside async callbacks without stale closures
   const targetUserRef = useRef(null);
   // Ref that always points to the LATEST handleSignalingData, avoiding stale closure in WebSocket
   const signalingCallbackRef = useRef(null);
+  // Buffer for ICE candidates arriving before RemoteDescription is set
+  const pendingCandidatesRef = useRef([]);
 
   const setupMedia = async () => {
     try {
@@ -151,6 +152,13 @@ function App() {
           break;
         }
         await pcRef.current.setRemoteDescription(new RTCSessionDescription(data.offer));
+        
+        // Process any buffered ICE candidates that arrived early
+        while (pendingCandidatesRef.current.length > 0) {
+          const candidate = pendingCandidatesRef.current.shift();
+          await pcRef.current.addIceCandidate(candidate).catch(e => console.error("Error adding buffered candidate:", e));
+        }
+
         const answer = await pcRef.current.createAnswer();
         await pcRef.current.setLocalDescription(answer);
         
@@ -166,12 +174,25 @@ function App() {
         // We received an SDP answer to our offer.
         if (pcRef.current) {
           await pcRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
+          
+          // Process any buffered ICE candidates that arrived early
+          while (pendingCandidatesRef.current.length > 0) {
+            const candidate = pendingCandidatesRef.current.shift();
+            await pcRef.current.addIceCandidate(candidate).catch(e => console.error("Error adding buffered candidate:", e));
+          }
         }
         break;
 
       case 'ice_candidate':
         if (pcRef.current) {
-          await pcRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
+          const candidate = new RTCIceCandidate(data.candidate);
+          // Only add candidate directly if remote description is ready
+          if (pcRef.current.remoteDescription && pcRef.current.remoteDescription.type) {
+            await pcRef.current.addIceCandidate(candidate).catch(e => console.error("Error adding ICE candidate:", e));
+          } else {
+            // Otherwise, buffer it
+            pendingCandidatesRef.current.push(candidate);
+          }
         }
         break;
 
@@ -258,6 +279,7 @@ function App() {
     }
 
     targetUserRef.current = null;
+    pendingCandidatesRef.current = []; // Clear buffer
     setActiveCall(false);
     setTargetUser(null);
     setIncomingCall(null);
