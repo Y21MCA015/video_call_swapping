@@ -71,11 +71,29 @@ function App() {
       });
     }
 
-    // On remote track received
+    // On remote track received — use retry if video element not mounted yet
     pc.ontrack = (event) => {
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = event.streams[0];
-      }
+      console.log('[WebRTC] ontrack fired, streams:', event.streams.length, 'track:', event.track.kind);
+      const remoteStream = event.streams[0] || new MediaStream([event.track]);
+      const assignStream = () => {
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = remoteStream;
+          console.log('[WebRTC] Remote stream assigned to video element');
+        } else {
+          console.warn('[WebRTC] remoteVideoRef not ready, retrying in 300ms...');
+          setTimeout(assignStream, 300);
+        }
+      };
+      assignStream();
+    };
+
+    // Log ICE connection state changes for debugging
+    pc.oniceconnectionstatechange = () => {
+      console.log('[ICE] Connection state:', pc.iceConnectionState);
+    };
+
+    pc.onconnectionstatechange = () => {
+      console.log('[WebRTC] Peer connection state:', pc.connectionState);
     };
 
     // On ICE candidate generated
@@ -87,6 +105,8 @@ function App() {
           to: target,
           from: role
         });
+      } else {
+        console.log('[ICE] All candidates gathered');
       }
     };
     
